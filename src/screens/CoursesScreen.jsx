@@ -1,0 +1,356 @@
+import React, { useState } from 'react';
+import { useMechLab } from '../context/MechLabContext';
+import { ASSETS } from '../data/brandAssets';
+import GenerateTrackBar from '../components/shared/GenerateTrackBar';
+
+export default function CoursesScreen({ active }) {
+  const {
+    navTo,
+    showToast,
+    selectTrackByTitleOrKey,
+    openLesson,
+    openBotWithPrompt,
+    customCourses,
+    allCoursesData,
+    tracks,
+  } = useMechLab();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCurriculumSlug, setSelectedCurriculumSlug] = useState('mechatronics');
+
+  const handleOpenCourseTrack = (keyOrTitle) => {
+    selectTrackByTitleOrKey('course', keyOrTitle);
+    navTo('course');
+  };
+
+  const baseCourses = [
+    {
+      key: 'drone',
+      icon: '🚁',
+      img: null,
+      title: 'Custom Drone Build',
+      desc: 'Design and assemble your own drone.',
+      progress: 82,
+      meta: '5 / 6 modules',
+      btnLabel: 'Continue',
+      locked: false,
+    },
+    {
+      key: 'robotics',
+      icon: null,
+      img: ASSETS.COURSE_ROBOTICS,
+      title: 'Robotics Fundamentals',
+      desc: 'Learn the basics of robots and their components.',
+      progress: 65,
+      meta: '6 / 10 lessons',
+      btnLabel: 'Continue',
+      locked: false,
+    },
+    {
+      key: 'ai',
+      icon: null,
+      img: ASSETS.COURSE_AI,
+      title: 'Artificial Intelligence Basics',
+      desc: 'Understand AI concepts and applications (11 PDF Lessons).',
+      progress: 40,
+      meta: `${tracks.ai?.a || 3} / 11 lessons`,
+      btnLabel: 'Continue',
+      locked: false,
+    },
+    {
+      key: 'mechatronics',
+      icon: '🤖',
+      img: null,
+      title: 'Mechatronics',
+      desc: 'Foundations of Mechatronics, Basic Electronics, Sensors & Actuators (11 PDF Lessons).',
+      progress: Math.round(((tracks.mechatronics?.a || 0) / 11) * 100),
+      meta: `${tracks.mechatronics?.a || 0} / 11 lessons`,
+      btnLabel: (tracks.mechatronics?.a || 0) > 0 ? 'Continue' : 'Start',
+      locked: false,
+    },
+    {
+      key: 'micro',
+      icon: null,
+      img: ASSETS.COURSE_MICRO,
+      title: 'Microcontrollers 101',
+      desc: 'Get started with Arduino and embedded systems.',
+      progress: 30,
+      meta: '3 / 10 lessons',
+      btnLabel: 'Continue',
+      locked: false,
+    },
+    {
+      key: 'elec',
+      icon: '⚡',
+      img: null,
+      title: 'Electronics Basics',
+      desc: 'Voltage, current and simple circuits.',
+      progress: 100,
+      meta: '4 / 4 lessons',
+      btnLabel: 'View course',
+      locked: false,
+    },
+    {
+      key: 'sensors',
+      icon: '⚙️',
+      img: null,
+      title: 'Sensors and Actuators',
+      desc: 'Make machines sense and move.',
+      progress: 0,
+      meta: '0 / 4 lessons',
+      btnLabel: 'Start',
+      locked: false,
+    },
+    {
+      key: 'cv-locked',
+      icon: '🔒',
+      img: null,
+      title: 'Computer Vision',
+      desc: 'Unlocks after AI Basics.',
+      progress: 0,
+      meta: 'Locked',
+      btnLabel: 'Locked',
+      locked: true,
+      toast: 'Finish AI Basics to unlock Computer Vision',
+    },
+  ];
+
+  const q = searchQuery.trim().toLowerCase();
+  const filteredBase = baseCourses.filter(
+    (c) =>
+      !q ||
+      c.title.toLowerCase().includes(q) ||
+      c.desc.toLowerCase().includes(q)
+  );
+
+  const selectedCourseObj =
+    allCoursesData?.[selectedCurriculumSlug] || allCoursesData?.mechatronics;
+  const activeTrackForSlug = tracks[selectedCurriculumSlug] || { a: 0 };
+
+  // Helper to compute flat step index (0..10) within the 11-topic course
+  let flatIdxCounter = 0;
+
+  return (
+    <section className={`screen${active ? ' show' : ''}`} id="courses">
+      <div className="hdr">
+        <h1>Learn</h1>
+      </div>
+      <div className="chips">
+        <button
+          className="chip"
+          type="button"
+          aria-pressed="true"
+          onClick={() => navTo('courses')}
+        >
+          Courses
+        </button>
+        <button
+          className="chip"
+          type="button"
+          aria-pressed="false"
+          onClick={() => navTo('projects')}
+        >
+          Projects
+        </button>
+      </div>
+      <GenerateTrackBar />
+      <input
+        className="f"
+        type="search"
+        placeholder="Search courses, topics..."
+        aria-label="Search courses"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
+      <div className="courses">
+        {customCourses.map((cc) => (
+          <div className="course" key={cc.key}>
+            <div
+              className="ct"
+              style={{
+                background: 'var(--tile)',
+                display: 'grid',
+                placeItems: 'center',
+                aspectRatio: '3/2',
+                fontSize: '2.4rem',
+              }}
+            >
+              ✨
+            </div>
+            <div className="cb">
+              <h3>{cc.title}</h3>
+              <p>Generated by Mech Bot · {cc.stopsCount} modules</p>
+              <div className="bar">
+                <i style={{ width: '0%' }} />
+              </div>
+              <div className="cf">
+                <span className="meta">0 / {cc.stopsCount} modules</span>
+                <button
+                  className="go"
+                  type="button"
+                  onClick={() => handleOpenCourseTrack(cc.key)}
+                >
+                  Start
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {filteredBase.map((c) => (
+          <div className="course" key={c.key}>
+            {c.img ? (
+              <div className="ct">
+                <img src={c.img} alt="" />
+              </div>
+            ) : (
+              <div
+                className="ct"
+                style={{
+                  background: 'var(--tile)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  aspectRatio: '3/2',
+                  fontSize: '2.4rem',
+                }}
+              >
+                {c.icon}
+              </div>
+            )}
+            <div className="cb">
+              <h3>{c.title}</h3>
+              <p>{c.desc}</p>
+              <div className="bar">
+                <i style={{ width: `${c.progress}%` }} />
+              </div>
+              <div className="cf">
+                <span className="meta">{c.meta}</span>
+                {c.locked ? (
+                  <button
+                    className="go lk"
+                    type="button"
+                    onClick={() => showToast(c.toast)}
+                  >
+                    {c.btnLabel}
+                  </button>
+                ) : (
+                  <button
+                    className="go"
+                    type="button"
+                    onClick={() => handleOpenCourseTrack(c.key)}
+                  >
+                    {c.btnLabel}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Interactive 22-PDF Course Curriculum Explorer */}
+      {selectedCourseObj && (
+        <div className="card" style={{ marginTop: '14px' }}>
+          <div className="hd">
+            <h2>Course Curriculum Library (22 Course PDFs)</h2>
+            <button
+              className="go"
+              type="button"
+              onClick={() => handleOpenCourseTrack(selectedCurriculumSlug)}
+            >
+              Open MechTrack Map →
+            </button>
+          </div>
+          <div className="chips" style={{ marginTop: '4px', marginBottom: '12px' }}>
+            <button
+              type="button"
+              className="chip"
+              aria-pressed={selectedCurriculumSlug === 'mechatronics' ? 'true' : 'false'}
+              onClick={() => setSelectedCurriculumSlug('mechatronics')}
+            >
+              Mechatronics (11 PDF Lessons)
+            </button>
+            <button
+              type="button"
+              className="chip"
+              aria-pressed={selectedCurriculumSlug === 'ai' ? 'true' : 'false'}
+              onClick={() => setSelectedCurriculumSlug('ai')}
+            >
+              Artificial Intelligence (11 PDF Lessons)
+            </button>
+          </div>
+
+          {selectedCourseObj.modules.map((mod) => {
+            const rows = mod.topics.map((topic) => {
+              const stepIdx = flatIdxCounter++;
+              const matchesSearch =
+                !q ||
+                topic.title.toLowerCase().includes(q) ||
+                topic.topicCode.toLowerCase().includes(q) ||
+                mod.title.toLowerCase().includes(q);
+              if (!matchesSearch) return null;
+              const isDone = stepIdx < activeTrackForSlug.a;
+
+              return (
+                <div
+                  key={topic.topicId}
+                  className="row"
+                  onClick={() => openLesson(selectedCurriculumSlug, stepIdx)}
+                >
+                  <div
+                    className="ti"
+                    style={{
+                      background: isDone ? '#DDF5E3' : 'var(--tile)',
+                      fontWeight: 700,
+                      fontSize: '.82rem',
+                    }}
+                  >
+                    {isDone ? '✓' : topic.topicCode}
+                  </div>
+                  <div>
+                    <b>
+                      Topic {topic.topicCode}: {topic.title}
+                    </b>
+                    <small>
+                      {mod.title} · {topic.pageCount} pages · {topic.imageCount}{' '}
+                      diagrams
+                    </small>
+                  </div>
+                  <button
+                    className="go"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openLesson(selectedCurriculumSlug, stepIdx);
+                    }}
+                  >
+                    Read Lesson
+                  </button>
+                </div>
+              );
+            });
+
+            if (rows.every((r) => r === null)) return null;
+
+            return (
+              <div key={mod.moduleId} style={{ marginBottom: '14px' }}>
+                <p className="lab" style={{ margin: '10px 0 6px' }}>
+                  {mod.title}
+                </p>
+                {rows}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <button
+        className="btn g"
+        type="button"
+        onClick={() => openBotWithPrompt('Suggest a course for me')}
+      >
+        Ask Mech Bot to suggest a course
+      </button>
+    </section>
+  );
+}
