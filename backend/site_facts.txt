@@ -1,0 +1,41 @@
+SITE FACTS — AI MECH LAB
+
+The site is called AI Mech Lab.
+
+The site teaches hardware only: AI, Robotics, Mechatronics, Electronics and Embedded Systems.
+
+BUILDING PATHWAY:
+The user types a project, like a drone or a robot. Then they choose:
+
+- "Learn how to build it": a full beginner track broken into small steps.
+- "Just build it": a checklist of build actions for people who already know the theory.
+
+LEARNING PATHWAY:
+The user picks a subject, like Mechatronics, and gets a track from the basics up to a confident level.
+
+TRACK STRUCTURE:
+A track is made of small steps. Each step is either:
+
+- Video step: a video plus a written lesson.
+- Manual step: a written checklist, used for things like buying parts and testing.
+
+KNOWN SKILLS:
+Skills the user already knows show as "Refresher" steps with a shorter video. The site remembers what the user has learned.
+
+TRACK EDITING:
+The user can ask for changes to their track, like removing or adding a step.
+
+SUPPORTED TOPICS:
+Goals outside hardware are not available on the site.
+
+COST AND PLANS:
+The site is free.
+
+CERTIFICATES:
+The site does not give certificates.
+
+SUPPORT:
+There is currently no support contact.
+
+ACCOUNTS AND LOGIN:
+Users need an account to use the site. They can sign up with email, LinkedIn or phone number. Their progress is saved to their account.
