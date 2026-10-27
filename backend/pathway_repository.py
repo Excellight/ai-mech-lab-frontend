@@ -19,7 +19,8 @@ def save_pathway(
     steps: list[dict],
     user_id: str | None = None,
     already_known: list | None = None,
-    note_version: str = "1",
+    *,
+    generation_fingerprint: str,
 ) -> GeneratedPathway:
     """Save a generated learning pathway and its steps."""
 
@@ -41,7 +42,7 @@ def save_pathway(
         pathway_type=pathway_type.strip(),
         already_known=already_known,
         generated_response=generated_response.strip(),
-        note_version=note_version,
+        generation_fingerprint=generation_fingerprint,
     )
 
     for step_data in steps:
@@ -89,7 +90,8 @@ def find_cached_pathway(
     pathway_type: str,
     user_id: str | None = None,
     already_known: list | None = None,
-    note_version: str = "1",
+    *,
+    generation_fingerprint: str,
 ) -> GeneratedPathway | None:
     """Find a matching pathway generated under the same instructions."""
 
@@ -101,7 +103,7 @@ def find_cached_pathway(
     statement = select(GeneratedPathway).where(
         GeneratedPathway.normalized_goal == normalized_goal,
         GeneratedPathway.pathway_type == pathway_type.strip(),
-        GeneratedPathway.note_version == note_version,
+        GeneratedPathway.generation_fingerprint == generation_fingerprint,
     )
 
     if user_id is None:
