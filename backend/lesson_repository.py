@@ -1,100 +1,88 @@
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.database_models import GeneratedLesson
 
---------------------------------------------------
-
-1. Save a generated lesson
-
---------------------------------------------------
 
 def save_lesson(
-db: Session,
-step_id: int,
-lesson_type: str,
-label: str,
-content: str,
+    db: Session,
+    step_id: int,
+    lesson_type: str,
+    label: str,
+    content: str,
+    *,
+    generation_fingerprint: str,
 ) -> GeneratedLesson:
-"""Save a generated lesson for a pathway step."""
+    if step_id <= 0:
+        raise ValueError("Step ID must be a positive integer.")
 
-lesson = GeneratedLesson(
-    step_id=step_id,
-    lesson_type=lesson_type,
-    label=label,
-    content=content,
-)
+    if not lesson_type.strip():
+        raise ValueError("Lesson type cannot be empty.")
 
-try:
-    db.add(lesson)
-    db.commit()
-    db.refresh(lesson)
-    return lesson
+    if not label.strip():
+        raise ValueError("Lesson label cannot be empty.")
 
-except Exception:
-    db.rollback()
-    raise
+    if not content.strip():
+        raise ValueError("Lesson content cannot be empty.")
 
---------------------------------------------------
+    lesson = GeneratedLesson(
+        step_id=step_id,
+        lesson_type=lesson_type.strip(),
+        label=label.strip(),
+        content=content.strip(),
+        generation_fingerprint=generation_fingerprint,
+    )
 
-2. Retrieve a lesson by its ID
+    try:
+        db.add(lesson)
+        db.commit()
+        db.refresh(lesson)
+        return lesson
+    except Exception:
+        db.rollback()
+        raise
 
---------------------------------------------------
 
 def get_lesson_by_id(
-db: Session,
-lesson_id: int,
+    db: Session,
+    lesson_id: int,
 ) -> GeneratedLesson | None:
-"""Retrieve a saved lesson by its database ID."""
+    statement = select(GeneratedLesson).where(
+        GeneratedLesson.id == lesson_id
+    )
+    return db.scalars(statement).first()
 
-statement = select(GeneratedLesson).where(
-    GeneratedLesson.id == lesson_id
-)
-
-return db.scalars(statement).first()
-
---------------------------------------------------
-
-3. Find an existing lesson for a step
-
---------------------------------------------------
 
 def find_cached_lesson(
-db: Session,
-step_id: int,
-lesson_type: str,
-label: str,
+    db: Session,
+    step_id: int,
+    lesson_type: str,
+    label: str,
+    *,
+    generation_fingerprint: str,
 ) -> GeneratedLesson | None:
-"""Look for an existing lesson matching the request."""
-
-statement = (
-    select(GeneratedLesson)
-    .where(
-        GeneratedLesson.step_id == step_id,
-        GeneratedLesson.lesson_type == lesson_type,
-        GeneratedLesson.label == label,
+    statement = (
+        select(GeneratedLesson)
+        .where(
+            GeneratedLesson.step_id == step_id,
+            GeneratedLesson.lesson_type == lesson_type,
+            GeneratedLesson.label == label,
+            GeneratedLesson.generation_fingerprint
+            == generation_fingerprint,
+        )
+        .order_by(GeneratedLesson.created_at.desc())
     )
-    .order_by(GeneratedLesson.created_at.desc())
-)
+    return db.scalars(statement).first()
 
-return db.scalars(statement).first()
-
---------------------------------------------------
-
-4. Retrieve all lessons for a step
-
---------------------------------------------------
 
 def get_lessons_for_step(
-db: Session,
-step_id: int,
+    db: Session,
+    step_id: int,
 ) -> list[GeneratedLesson]:
-"""Return all saved lessons for a pathway step."""
-
-statement = (
-    select(GeneratedLesson)
-    .where(GeneratedLesson.step_id == step_id)
-    .order_by(GeneratedLesson.created_at.desc())
-)
-
-return list(db.scalars(statement).all())
+    statement = (
+        select(GeneratedLesson)
+        .where(GeneratedLesson.step_id == step_id)
+        .order_by(GeneratedLesson.created_at.desc())
+    )
+    return list(db.scalars(statement).all())
