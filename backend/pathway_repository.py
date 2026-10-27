@@ -1,126 +1,126 @@
+import re
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.database_models import GeneratedPathway, PathwayStep
 
---------------------------------------------------
 
-1. Save a generated pathway and its steps
+def normalize_goal(goal: str) -> str:
+    """Normalize a learning goal for consistent cache lookups."""
+    return re.sub(r"\s+", " ", goal.strip().casefold())
 
---------------------------------------------------
 
 def save_pathway(
-db: Session,
-goal: str,
-pathway_type: str,
-generated_response: str,
-steps: list[dict],
-user_id: str | None = None,
-already_known: list | None = None,
+    db: Session,
+    goal: str,
+    pathway_type: str,
+    generated_response: str,
+    steps: list[dict],
+    user_id: str | None = None,
+    already_known: list | None = None,
+    note_version: str = "1",
 ) -> GeneratedPathway:
-"""
-Save a generated pathway and its steps.
+    """Save a generated learning pathway and its steps."""
 
-The caller should check the cache before creating
-a new pathway.
-"""
+    normalized_goal = normalize_goal(goal)
 
-pathway = GeneratedPathway(
-    user_id=user_id,
-    goal=goal,
-    pathway_type=pathway_type,
-    already_known=already_known,
-    generated_response=generated_response,
-)
+    if not normalized_goal:
+        raise ValueError("Learning goal cannot be empty.")
 
-for step_data in steps:
-    pathway.steps.append(
-        PathwayStep(
-            step_number=step_data["step_number"],
-            name=step_data["name"],
-            label=step_data.get("label"),
-            step_type=step_data.get("type"),
-            video_search_phrase=step_data.get(
-                "video_search_phrase"
-            ),
-            video_length=step_data.get("video_length"),
-        )
+    if not pathway_type.strip():
+        raise ValueError("Pathway type cannot be empty.")
+
+    if not generated_response.strip():
+        raise ValueError("Generated response cannot be empty.")
+
+    pathway = GeneratedPathway(
+        user_id=user_id,
+        goal=goal.strip(),
+        normalized_goal=normalized_goal,
+        pathway_type=pathway_type.strip(),
+        already_known=already_known,
+        generated_response=generated_response.strip(),
+        note_version=note_version,
     )
 
-try:
-    db.add(pathway)
-    db.commit()
-    db.refresh(pathway)
-    return pathway
+    for step_data in steps:
+        pathway.steps.append(
+            PathwayStep(
+                step_number=step_data["step_number"],
+                name=step_data["name"],
+                label=step_data.get("label"),
+                step_type=step_data.get("type"),
+                video_search_phrase=step_data.get(
+                    "video_search_phrase"
+                ),
+                video_length=step_data.get("video_length"),
+            )
+        )
 
-except Exception:
-    db.rollback()
-    raise
+    try:
+        db.add(pathway)
+        db.commit()
+        db.refresh(pathway)
+        return pathway
+    except Exception:
+        db.rollback()
+        raise
 
---------------------------------------------------
-
-2. Retrieve a pathway by its database ID
-
---------------------------------------------------
 
 def get_pathway_by_id(
-db: Session,
-pathway_id: int,
+    db: Session,
+    pathway_id: int,
 ) -> GeneratedPathway | None:
-"""Retrieve a pathway and its steps."""
+    """Retrieve a pathway and its steps by ID."""
 
-statement = (
-    select(GeneratedPathway)
-    .where(GeneratedPathway.id == pathway_id)
-    .options(
-        selectinload(GeneratedPathway.steps)
+    statement = (
+        select(GeneratedPathway)
+        .where(GeneratedPathway.id == pathway_id)
+        .options(selectinload(GeneratedPathway.steps))
     )
-)
 
-return db.scalars(statement).first()
+    return db.scalars(statement).first()
 
---------------------------------------------------
-
-3. Find an existing pathway for a goal
-
---------------------------------------------------
 
 def find_cached_pathway(
-db: Session,
-goal: str,
-pathway_type: str,
-user_id: str | None = None,
-already_known: list | None = None,
+    db: Session,
+    goal: str,
+    pathway_type: str,
+    user_id: str | None = None,
+    already_known: list | None = None,
+    note_version: str = "1",
 ) -> GeneratedPathway | None:
-"""
-Find an existing pathway matching the request.
+    """Find a matching pathway generated under the same instructions."""
 
-This is a basic cache lookup. We will refine the
-matching rules after testing the actual requirements.
-"""
+    normalized_goal = normalize_goal(goal)
 
-statement = select(GeneratedPathway).where(
-    GeneratedPathway.goal == goal,
-    GeneratedPathway.pathway_type == pathway_type,
-)
+    if not normalized_goal:
+        return None
 
-if user_id is None:
-    statement = statement.where(
-        GeneratedPathway.user_id.is_(None)
-    )
-else:
-    statement = statement.where(
-        GeneratedPathway.user_id == user_id
+    statement = select(GeneratedPathway).where(
+        GeneratedPathway.normalized_goal == normalized_goal,
+        GeneratedPathway.pathway_type == pathway_type.strip(),
+        GeneratedPathway.note_version == note_version,
     )
 
-statement = statement.options(
-    selectinload(GeneratedPathway.steps)
-)
+    if user_id is None:
+        statement = statement.where(
+            GeneratedPathway.user_id.is_(None)
+        )
+    else:
+        statement = statement.where(
+            GeneratedPathway.user_id == user_id
+        )
 
-candidates = db.scalars(statement).all()
+    statement = statement.options(
+        selectinload(GeneratedPathway.steps)
+    )
 
-for pathway in candidates:
-    if pathway.already_known == already_known:
-        return pathway
+    candidates = db.scalars(statement).all()
 
-return None
+    for pathway in candidates:
+        if pathway.already_known == already_known:
+            return pathway
+
+    return None
