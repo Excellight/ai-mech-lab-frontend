@@ -41,8 +41,8 @@ class GeneratedPathway(Base):
     generated_response: Mapped[str] = mapped_column(
         Text, nullable=False
     )
-    note_version: Mapped[str] = mapped_column(
-        String(50), nullable=False, default="1"
+    generation_fingerprint: Mapped[str] = mapped_column(
+    String(64), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -61,7 +61,7 @@ class GeneratedPathway(Base):
             "ix_pathway_cache_lookup",
             "normalized_goal",
             "pathway_type",
-            "note_version",
+            "generation_fingerprint",
         ),
     )
 
@@ -138,8 +138,8 @@ class GeneratedLesson(Base):
     content: Mapped[str] = mapped_column(
         Text, nullable=False
     )
-    note_version: Mapped[str] = mapped_column(
-        String(50), nullable=False, default="1"
+    generation_fingerprint: Mapped[str] = mapped_column(
+    String(64), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -157,7 +157,7 @@ class GeneratedLesson(Base):
             "step_id",
             "lesson_type",
             "label",
-            "note_version",
+            "generation_fingerprint",
         ),
     )
 
