@@ -5,3 +5,16 @@ dist/
 !.env.example
 .DS_Store
 
+# Environment secrets
+.env
+.env.*
+!.env.example
+backend/.env
+
+# Python virtual environments
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
