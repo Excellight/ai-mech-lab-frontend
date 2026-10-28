@@ -1,242 +1,310 @@
-AI Mech Lab — Setup and Troubleshooting Guide
+AI Mech Lab — Backend Setup, Troubleshooting and Completion Guide
 
 1. Purpose
 
-This guide explains how to configure the backend, connect PostgreSQL, create the database tables, and troubleshoot common errors.
+This document explains how to set up and run the AI Mech Lab backend, diagnose common errors, and safely complete unfinished implementation work.
 
-The current implementation is a foundation and has not yet been verified through a complete integration test.
+Working branch: "backend-foundation"
 
-2. Required files
+Important: Do not commit directly to "main". Do not overwrite existing files or remove working functionality without first understanding the impact.
 
-File| Purpose
-"database.py"| Connects Python to PostgreSQL
-"database_models.py"| Defines the database tables
-"create_tables.py"| Creates missing tables
-"pathway_repository.py"| Saves and retrieves pathways
-"lesson_repository.py"| Saves and retrieves lessons
-"video_repository.py"| Saves and retrieves cached videos
-"gemini_service.py"| Generates responses using Gemini
-"gemini_response_parser.py"| Parses and validates Gemini responses
-"main.py"| Starts the FastAPI application
-"requirements.txt"| Lists Python dependencies
-".env.example"| Documents required environment variables
+2. Understand the current backend
 
-Some files, including "database.py" and "main.py", were initially created locally. Confirm that all required files have been included in the project before running it.
+The backend work includes database models and repositories, Gemini service logic, and Gemini response parsing.
 
-3. Initial setup
+Relevant files include:
 
-Step 1: Install dependencies
+- "backend/database.py" — database connection and session configuration.
+- "backend/database_models.py" — SQLAlchemy table definitions.
+- "backend/pathway_repository.py" — pathway storage and retrieval.
+- "backend/lesson_repository.py" — lesson storage and retrieval.
+- "backend/video_repository.py" — video-cache storage and retrieval.
+- "backend/gemini_service.py" — Gemini configuration and response generation.
+- "backend/gemini_response_parser.py" — response parsing and validation.
+- "backend/gemini_notes.txt" — instructions for Gemini response types.
+- "backend/site_facts.txt" — facts used by the site chatbot.
+- "backend/requirements.txt" — Python dependencies.
+- "backend/main.py" — FastAPI application entry point, if available in the checked-out branch.
 
-From the project root, run:
+Some files may exist only in a developer's local copy. Check the actual branch before assuming every file has been committed.
 
-"python -m pip install -r backend/requirements.txt"
+3. Environment configuration
 
-Use the project's intended Python environment.
+Create "backend/.env" locally. Never commit the real file.
 
-Step 2: Configure environment variables
+Example configuration:
 
-Copy "backend/.env.example" to "backend/.env".
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=ai_mech_lab
+DB_USER=your_postgres_username
+DB_PASSWORD=your_postgres_password
 
-Configure:
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
 
-- "DB_HOST"
-- "DB_PORT"
-- "DB_NAME"
-- "DB_USER"
-- "DB_PASSWORD"
-- "GEMINI_API_KEY"
-- "GEMINI_MODEL"
+Replace placeholder values with the correct credentials. Confirm the agreed Gemini model before changing it.
 
-The database variables are required for PostgreSQL access. Gemini credentials are required for Gemini generation, but not for creating the tables alone.
+If the team needs a template, create "backend/.env.example" with placeholders only.
 
-Never commit actual passwords or API keys.
+Ensure ".gitignore" excludes ".env", virtual environments, "__pycache__/", and Python bytecode files. Do not remove existing ignore rules.
 
-Step 3: Create the PostgreSQL database
+4. Install dependencies
 
-Start PostgreSQL and create a database named "ai_mech_lab" if it does not already exist.
+From the repository root, create and activate a virtual environment if one is not already configured.
 
-Confirm that the configured database user has the necessary permissions.
+Windows PowerShell:
 
-Step 4: Create the tables
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r backend/requirements.txt
 
-From the project root, run:
+If activation is blocked, use the environment's Python executable directly:
 
-"python -m backend.create_tables"
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
 
-If the imports and configuration are correct, the script should create missing tables defined by the SQLAlchemy models.
+Run all commands from the repository root unless otherwise specified.
 
-Step 5: Verify the tables
+5. Database setup and table creation
 
-Open pgAdmin and navigate to:
+1. Open PostgreSQL using pgAdmin or another PostgreSQL client.
+2. Confirm that the database "ai_mech_lab" exists.
+3. Confirm the credentials and port in "backend/.env".
+4. Confirm that "backend/database.py" and "backend/database_models.py" are present.
+5. Ensure all models are imported before SQLAlchemy creates the tables.
 
-"ai_mech_lab → Schemas → public → Tables"
+If a table-creation script is available, run it from the repository root:
 
-Refresh the Tables folder.
+python -m backend.create_tables
 
-Check that the expected tables exist and that their columns, foreign keys, and constraints match "database_models.py".
+This command assumes "backend/create_tables.py" exists and its imports are correct. If it does not exist, create and review the script before running the command.
 
-4. Common errors and how to fix them
+A typical implementation is:
 
-Error A: "ModuleNotFoundError"
+from sqlalchemy.exc import SQLAlchemyError
 
-Meaning: Python cannot find a required package or module.
+from backend.database import Base, engine
+from backend import database_models
 
-Try this:
 
-1. Confirm that the terminal is in the project root.
-2. Confirm that the "backend" folder and required Python files exist.
-3. Install dependencies using the command in Section 3.
-4. Run the table creation command from the project root.
+def create_tables():
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("Database table creation completed.")
 
-Do not rename imports or move files randomly to make the error disappear.
+        for table_name in sorted(Base.metadata.tables):
+            print(f"- {table_name}")
 
-Error B: "ModuleNotFoundError: No module named 'psycopg'"
+    except SQLAlchemyError as error:
+        print(f"Database table creation failed: {error}")
+        raise
 
-Meaning: The PostgreSQL Python driver is missing from the active environment.
 
-Try this:
+if __name__ == "__main__":
+    create_tables()
 
-"python -m pip install "psycopg[binary]""
+The model import is intentional: SQLAlchemy must know about the models before "create_all()" can create their tables.
 
-Then retry the database connection.
+Expected result: the script finishes without an exception, and the expected tables are visible in pgAdmin.
 
-Error C: "password authentication failed"
+The current design includes generated pathways, pathway steps, generated lessons, and a video cache. Verify the actual table names against "database_models.py".
 
-Meaning: PostgreSQL rejected the username or password.
+Important limitation: "create_all()" creates missing tables but does not update existing tables when model definitions change. Use reviewed Alembic migrations for schema changes to an existing database.
 
-Try this:
+6. Starting the FastAPI application
 
-1. Check "DB_USER" and "DB_PASSWORD" in the local ".env".
-2. Confirm that the credentials work in pgAdmin or another PostgreSQL client.
-3. Check that "DB_HOST" and "DB_PORT" point to the intended server.
+If "backend/main.py" contains the FastAPI application instance named "app", start it from the repository root:
 
-Do not paste passwords into error reports or public chats.
+python -m uvicorn backend.main:app --reload
 
-Error D: "database "ai_mech_lab" does not exist"
+If Uvicorn is not installed, install the project's requirements first.
 
-Meaning: The PostgreSQL server is reachable, but the specified database has not been created.
+Open these URLs in a browser:
 
-Try this:
+- "http://127.0.0.1:8000/"
+- "http://127.0.0.1:8000/health"
+- "http://127.0.0.1:8000/docs"
 
-1. Open pgAdmin.
-2. Connect to the correct PostgreSQL server.
-3. Create the database "ai_mech_lab".
-4. Confirm that "DB_NAME=ai_mech_lab" is set locally.
+These checks apply only if the corresponding routes exist. A successful health check proves that the server responds; it does not prove that the database or Gemini integration works.
 
-Creating the database and creating its tables are two separate operations.
+7. Common errors and how to resolve them
 
-Error E: "connection refused" or a connection timeout
+A. "ModuleNotFoundError"
 
-Meaning: Python cannot establish a connection to the configured PostgreSQL server.
+Likely cause: a dependency is missing, or Python cannot resolve an import.
 
-Try this:
+Action:
 
-1. Confirm that PostgreSQL is running.
-2. Check the host and port.
-3. Confirm that the server accepts connections from the machine running Python.
-4. If PostgreSQL is hosted remotely, check network access and firewall rules.
+1. Activate the correct virtual environment.
+2. Install "backend/requirements.txt".
+3. Run commands from the repository root.
+4. Check that imported modules and filenames exist.
+5. Use consistent imports, such as "from backend.database import Base".
 
-Error F: Missing database environment variables
+Do not rename files or change import paths randomly to suppress the error.
 
-Meaning: The application could not load the required database configuration.
+B. "No module named psycopg"
 
-Try this:
+Likely cause: the PostgreSQL Python driver is missing from the active environment.
 
-1. Confirm that "backend/.env" exists.
-2. Check that the variable names match those expected by "database.py".
-3. Check that the values are not empty.
-4. Restart the application after correcting the configuration.
+Action:
 
-Keep ".env" local and private.
+python -m pip install "psycopg[binary]"
 
-Error G: The script reports success, but tables are missing
+Then retry the original command using the same Python environment.
 
-Meaning: The expected models may not have been registered, the wrong database may have been selected, or the table names may differ from expectations.
+C. "password authentication failed"
 
-Try this:
+Likely cause: the PostgreSQL username or password is incorrect.
 
-1. Confirm that "create_tables.py" imports "database_models".
-2. Confirm that the models inherit from the same "Base" object used by the engine.
-3. Check which database is configured in ".env".
-4. Refresh the correct database's Tables folder in pgAdmin.
-5. Inspect "database_models.py" for the actual table names.
+Action:
 
-Error H: "GEMINI_API_KEY" is missing
+1. Check "DB_USER" and "DB_PASSWORD" in "backend/.env".
+2. Test those credentials in pgAdmin or another PostgreSQL client.
+3. Check whether the local PostgreSQL account uses a different password.
+4. Restart the backend after correcting the settings.
 
-Meaning: The Gemini service cannot find its API key.
+Never paste database passwords into GitHub issues or public chat.
 
-Try this:
+D. "database "ai_mech_lab" does not exist"
 
-1. Confirm that "backend/.env" contains "GEMINI_API_KEY".
-2. Confirm that the service loads the correct ".env" path.
-3. Confirm that the key is valid.
-4. Restart the Python process after updating the environment.
+Likely cause: the database has not been created or "DB_NAME" is incorrect.
 
-A missing Gemini key should not prevent PostgreSQL tables from being created.
+Action: create the database in PostgreSQL or correct "DB_NAME". Creating a database and creating its tables are separate operations.
 
-Error I: Gemini returns an authentication, quota, or model error
+E. "Connection refused" or connection timeout
 
-Meaning: The request may have invalid credentials, insufficient quota, or an unavailable model.
+Likely cause: PostgreSQL is stopped, the host or port is wrong, or network access is blocked.
 
-Try this:
+Action:
 
-1. Check the API key and its access.
-2. Check the project's current quota and usage limits.
-3. Confirm that the configured model is available to the account.
-4. Check the full error message before changing the model.
+1. Confirm PostgreSQL is running.
+2. Check "DB_HOST" and "DB_PORT".
+3. Verify the server accepts connections from the machine running the backend.
+4. Retry the connection.
 
-Do not automatically switch models without confirming the team's decision and cost implications.
+Do not change firewall or remote database settings without authorization.
 
-Error J: The parser reports an invalid pathway
+F. Missing environment-variable error
 
-Meaning: Gemini returned content that did not satisfy the parser's structural validation.
+Likely cause: ".env" is missing, incorrectly named, or has incomplete settings.
 
-Try this:
+Action:
 
-1. Inspect the parser's reported validation errors.
-2. Compare the raw response with the appropriate Gemini instruction note.
-3. Confirm that step numbering, labels, types, and video lengths follow the required format.
-4. Do not save the response as a valid pathway while validation fails.
+1. Confirm the file is named ".env", not ".env.txt".
+2. Place it in "backend/".
+3. Check the required variable names.
+4. Check that the correct working environment is being used.
 
-A retry or regeneration strategy may be added later, but should be implemented deliberately to avoid unnecessary API usage.
+Do not print the actual secret values while debugging.
 
-Error K: "create_all()" does not update an existing table
+G. The script runs, but tables are missing
 
-Meaning: SQLAlchemy's "create_all()" creates missing tables; it is not a general schema migration system.
+Likely cause: the models were not imported, the wrong database was selected, or table creation was never executed.
 
-Try this:
+Action:
 
-1. Inspect the existing table structure.
-2. Compare it with the current models.
-3. Use an Alembic migration to apply approved schema changes.
+1. Inspect "Base.metadata.tables".
+2. Confirm "database_models.py" is imported before "create_all()".
+3. Check the database name and schema in pgAdmin.
+4. Confirm the script actually executed.
+5. Review the output for errors.
 
-Do not drop tables or delete existing records merely to make the schema match.
+H. "GEMINI_API_KEY is missing"
 
-5. Important limitations
+Likely cause: the key is absent from the backend environment.
 
-- Successful table creation does not prove that the complete backend works.
-- Repository operations must be tested separately.
-- Gemini generation and response parsing must be tested separately.
-- API endpoints must be tested after they are implemented.
-- Shared database model changes must be coordinated with the backend team.
+Action:
 
-6. Security requirements
+1. Confirm "GEMINI_API_KEY" is set in "backend/.env".
+2. Check that "gemini_service.py" loads that file.
+3. Restart the backend process.
+4. Never hardcode the key into Python source code.
 
-- Never commit ".env" or real API keys.
-- Never paste database passwords into public error reports.
-- Use appropriately restricted database credentials.
-- Keep Gemini credentials in environment variables.
-- Rotate any credential that has been exposed.
+I. Gemini authentication, quota, or model errors
 
-7. Reporting an unresolved error
+Likely cause: an invalid or restricted API key, exhausted quota, unavailable model, or API configuration issue.
 
-If an error persists, report:
+Action:
 
-1. The exact command that was run.
-2. The complete error message, with secrets removed.
-3. The Python version.
-4. Whether PostgreSQL is running.
-5. Whether the database exists.
-6. Which step failed.
+1. Check the key through the authorized Google AI account.
+2. Confirm the configured model is available to that account.
+3. Review the error category and applicable quota limits.
+4. Avoid repeated automatic retries for authentication or quota errors.
+5. Never log or share the API key.
 
-This information helps the team identify the problem without repeatedly guessing.
+J. The Gemini parser rejects a pathway
+
+Likely cause: the generated response does not follow the expected numbered-step structure or required fields.
+
+Action:
+
+1. Record the response type and parser error.
+2. Compare the output with the relevant instruction in "gemini_notes.txt".
+3. Check step numbering, step names, "Type", labels, video-search phrases, and video lengths.
+4. Adjust the relevant prompt or parsing logic only after identifying the mismatch.
+5. Add a test for the failure case.
+
+Do not save a response as a valid pathway when parsing or validation fails.
+
+K. Tables do not reflect updated model definitions
+
+Likely cause: "create_all()" does not migrate existing tables.
+
+Action: inspect the current schema and create a reviewed Alembic migration. Back up important data before applying schema changes.
+
+8. How to complete unfinished code safely
+
+When a required feature does not work:
+
+1. Identify the failure. Record the command, endpoint, error message, and expected behavior.
+2. Find the responsible file. Check the existing implementation before creating a duplicate.
+3. Trace dependencies. Confirm the relevant models, repositories, configuration, and imports.
+4. Implement the smallest necessary change. Avoid rewriting unrelated modules.
+5. Test the change. Use a local database and safe test credentials.
+6. Check failure handling. Database writes should roll back when appropriate; failed Gemini responses should not be stored as valid results.
+7. Review security. Keep credentials out of source code and logs.
+8. Commit on "backend-foundation". Use a clear commit message and report what changed.
+
+If the intended behavior is unclear, ask the project owner before changing the data model or API contract.
+
+9. Minimum integration checks
+
+Before reporting the backend as ready, verify each item separately:
+
+- [ ] Python dependencies install successfully.
+- [ ] FastAPI starts without import errors.
+- [ ] The health endpoint responds, if implemented.
+- [ ] PostgreSQL connection succeeds.
+- [ ] Expected tables exist in the correct database.
+- [ ] A test pathway can be saved and retrieved.
+- [ ] A test lesson can be saved and retrieved.
+- [ ] Video-cache lookups use the expected cache key.
+- [ ] Gemini can generate a response using a valid, authorized key.
+- [ ] The parser accepts a valid sample and rejects an invalid sample.
+- [ ] Cached responses are reused where the implemented integration supports it.
+- [ ] No secrets or local environment files are committed.
+
+These are verification tasks, not claims that the checks have already passed.
+
+10. Responsibility boundaries
+
+Database and Gemini integration: database configuration, model/table setup, repository behavior, Gemini response generation, response parsing, and related caching logic.
+
+Other backend API work: authentication, user accounts, courses, progress, community features, and other API endpoints assigned to the backend API developer.
+
+Coordinate changes that affect shared models, endpoint contracts, or imports before merging them.
+
+11. What to report if the problem remains unresolved
+
+Send the following information to the team:
+
+- Exact command or endpoint used.
+- Full error message with secrets removed.
+- File and line where the error occurs.
+- Expected behavior versus actual behavior.
+- Steps already attempted.
+- Whether the database, server, or Gemini request worked independently.
+
+Do not claim the backend is complete until the relevant tests have actually passed.
