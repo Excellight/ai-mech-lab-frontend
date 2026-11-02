@@ -1,12 +1,8 @@
 /**
  * User Progress, Telemetry, Gamification & Preferences Service Layer
- *
- * STATUS: Currently operates in local/in-memory mode with safe localStorage persistence
- * while preserving the exact baseline KPI values required by the original AI Mech Lab design.
- * BACKEND INTEGRATION POINT: Connect these functions to the backend database to persist
- * learner XP, daily streaks, activity feed, checkpoint mastery, quiz attempts, lab runs,
- * notifications, and user settings across devices.
+ * Connected to FastAPI + PostgreSQL backend.
  */
+import { safeFetch } from './apiConfig.js';
 
 export const INITIAL_LEARNER_STATS = {
   xp: 1250,
@@ -117,16 +113,22 @@ export const INITIAL_NOTIFICATIONS = [
   }
 ];
 
-/**
- * Computes updated learner stats when XP is awarded for a classroom activity.
- *
- * @param {Object} prevStats
- * @param {Object} event
- * @param {number} event.amount - XP amount earned
- * @param {string} [event.category] - 'Courses' | 'Quizzes' | 'Labs' | 'Projects' | 'Practice'
- * @param {boolean} [event.isProblem] - Whether this counts toward the 2-problem daily streak
- * @returns {Object} Next learnerStats object
- */
+export async function fetchDashboardTelemetry() {
+  const data = await safeFetch('/user/dashboard');
+  if (data && data.learnerStats) {
+    return {
+      learnerStats: data.learnerStats,
+      activityFeed: data.activityFeed || INITIAL_ACTIVITY_FEED,
+      unreadNotifications: Boolean(data.unreadNotifications)
+    };
+  }
+  return {
+    learnerStats: INITIAL_LEARNER_STATS,
+    activityFeed: INITIAL_ACTIVITY_FEED,
+    unreadNotifications: true
+  };
+}
+
 export function computeNextLearnerStats(prevStats, { amount = 10, category = 'Practice', isProblem = true } = {}) {
   const nextXp = prevStats.xp + amount;
   const nextProblems = isProblem ? prevStats.dailyProblemsSolved + 1 : prevStats.dailyProblemsSolved;
@@ -135,6 +137,17 @@ export function computeNextLearnerStats(prevStats, { amount = 10, category = 'Pr
   const nextLevel = Math.max(7, 7 + Math.floor((nextXp - 1250) / 300));
   const nextLabs = category === 'Labs' ? prevStats.labsCompleted + 1 : prevStats.labsCompleted;
   const nextAch = nextXp >= 1400 && prevStats.achievementsCount === 24 ? 25 : prevStats.achievementsCount;
+
+  // Background sync to backend
+  safeFetch('/user/xp', {
+    method: 'POST',
+    body: JSON.stringify({
+      amount,
+      activityTitle: `Activity in ${category}`,
+      category,
+      isProblem
+    })
+  });
 
   return {
     ...prevStats,
@@ -147,13 +160,6 @@ export function computeNextLearnerStats(prevStats, { amount = 10, category = 'Pr
   };
 }
 
-/**
- * Formats a new activity item for the Recent Activity feed (#dash and #activity).
- *
- * @param {string} title
- * @param {string} category
- * @returns {Object} ActivityFeedItem
- */
 export function createActivityFeedItem(title, category = 'Practice') {
   const iconMap = {
     Labs: { icon: '🧪', bg: '#DDF5E3' },
@@ -173,52 +179,26 @@ export function createActivityFeedItem(title, category = 'Practice') {
   };
 }
 
-/**
- * Records a lesson checkpoint attempt.
- * Used by: src/screens/LessonScreen.jsx
- *
- * @param {Object} attempt
- * @param {string} attempt.topicId - e.g. 'mechatronics-m2-t2.1' or 'ai-m4-t4.2'
- * @param {number} attempt.checkpointIndex - 0-based checkpoint question index
- * @param {number} attempt.selectedOption - 0-based option index chosen
- * @param {boolean} attempt.isCorrect - Whether the selected option matched answer index `a`
- * @returns {Promise<{ ok: boolean }>}
- */
 export async function recordCheckpointAttempt(attempt) {
-  // BACKEND TODO: Persist checkpoint telemetry for mastery tracking & AI tutor context
+  await safeFetch('/classroom/checkpoint', {
+    method: 'POST',
+    body: JSON.stringify(attempt)
+  });
   return { ok: true, attempt };
 }
 
-/**
- * Records a completed quiz session from #quiz.
- * Used by: src/screens/QuizScreen.jsx
- *
- * @param {Object} result
- * @param {string} result.deckId - 'daily' | 'sensors' | 'pid' | 'ai' | 'circuits'
- * @param {number} result.score - Number of correct answers
- * @param {number} result.totalQuestions - Total questions in the deck
- * @param {number} result.xpEarned - XP awarded
- * @returns {Promise<{ ok: boolean }>}
- */
 export async function recordQuizCompletion(result) {
-  // BACKEND TODO: Persist quiz attempt and recalculate rolling quizScoreAvg
+  await safeFetch('/classroom/quiz', {
+    method: 'POST',
+    body: JSON.stringify(result)
+  });
   return { ok: true, result };
 }
 
-/**
- * Syncs user accessibility and app settings.
- * Used by: src/screens/AppearanceScreen.jsx, src/screens/SettingsScreen.jsx, src/screens/LanguageScreen.jsx
- *
- * @param {Object} prefs
- * @param {'system'|'light'|'dark'} [prefs.themePref]
- * @param {number} [prefs.textSize]
- * @param {boolean} [prefs.reduceMotion]
- * @param {boolean} [prefs.lessonReminders]
- * @param {boolean} [prefs.soundEffects]
- * @param {string} [prefs.selectedLanguage]
- * @returns {Promise<{ ok: boolean }>}
- */
 export async function syncUserPreferences(prefs) {
-  // BACKEND TODO: Persist user preferences to user settings table
+  await safeFetch('/user/preferences', {
+    method: 'POST',
+    body: JSON.stringify(prefs)
+  });
   return { ok: true, prefs };
 }

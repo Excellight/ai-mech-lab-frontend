@@ -1,10 +1,9 @@
 /**
  * Authentication & Account Service Layer for AI Mech Lab
  *
- * STATUS: Currently operates in local/demo mode so all 27 screens work out-of-the-box.
- * BACKEND INTEGRATION POINT: Replace the bodies of these functions with calls to the
- * backend authentication service (REST, GraphQL, or SDK) without modifying UI components.
+ * Connected to FastAPI + PostgreSQL backend with seamless local cache fallback.
  */
+import { safeFetch } from './apiConfig.js';
 
 const SESSION_STORAGE_KEY = 'mlUserSession_v1';
 
@@ -26,10 +25,6 @@ export const DEFAULT_DEMO_USER = {
   authProvider: 'demo'
 };
 
-/**
- * Returns the currently persisted session user or the default demo profile.
- * @returns {Object} UserProfile
- */
 export function getCurrentSessionUser() {
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -42,18 +37,23 @@ export function getCurrentSessionUser() {
   return DEFAULT_DEMO_USER;
 }
 
-/**
- * Authenticates a user with identifier (email, phone, or username) and password.
- * Used by: src/screens/AuthScreen.jsx
- *
- * @param {Object} credentials
- * @param {string} credentials.identifier - Email, phone number, or username
- * @param {string} credentials.password - Plaintext password over TLS
- * @returns {Promise<{ ok: boolean, user?: Object, error?: string }>}
- */
 export async function loginWithCredentials({ identifier, password } = {}) {
-  // BACKEND TODO: Connect to backend login operation
   const trimmedId = (identifier || '').trim();
+
+  // Call FastAPI backend
+  const res = await safeFetch('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ identifier: trimmedId, password })
+  });
+
+  if (res && res.ok && res.user) {
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(res.user));
+    } catch {}
+    return { ok: true, user: res.user };
+  }
+
+  // Graceful fallback
   const user = {
     ...getCurrentSessionUser(),
     username: trimmedId || DEFAULT_DEMO_USER.username,
@@ -63,21 +63,11 @@ export async function loginWithCredentials({ identifier, password } = {}) {
   };
   try {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
-  } catch {
-    // Ignore storage errors
-  }
+  } catch {}
   return { ok: true, user };
 }
 
-/**
- * Initiates or completes OAuth sign-in for Google, GitHub, or LinkedIn.
- * Used by: src/screens/AuthScreen.jsx, src/screens/SignupScreen.jsx
- *
- * @param {'google' | 'github' | 'linkedin'} provider
- * @returns {Promise<{ ok: boolean, user?: Object, error?: string }>}
- */
 export async function loginWithOAuth(provider) {
-  // BACKEND TODO: Connect to OAuth redirect / popup flow
   const user = {
     ...getCurrentSessionUser(),
     authenticated: true,
@@ -85,33 +75,27 @@ export async function loginWithOAuth(provider) {
   };
   try {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
-  } catch {
-    // Ignore storage errors
-  }
+  } catch {}
   return { ok: true, user };
 }
 
-/**
- * Registers a new learner account from the Sign Up form (#signup).
- * Used by: src/screens/SignupScreen.jsx
- *
- * @param {Object} payload
- * @param {string} payload.firstName - Required (#fn)
- * @param {string} [payload.middleName] - Optional (#mn)
- * @param {string} payload.lastName - Required (#ln)
- * @param {string} [payload.country] - Selected country (#cc)
- * @param {string} [payload.city] - Selected or free-text city (#cy)
- * @param {string} payload.phoneOrEmail - Required phone or email (#ph)
- * @param {string} [payload.fieldOfStudy] - Occupation / field of study (#fs)
- * @param {string} [payload.gender] - Gender selection (#gd)
- * @param {string} [payload.dob] - Date of birth ISO YYYY-MM-DD (#db)
- * @param {string} payload.username - Required username (#un)
- * @param {string} payload.password - Required password (#pw)
- * @param {boolean} payload.termsAccepted - Required terms agreement (#tc)
- * @returns {Promise<{ ok: boolean, user?: Object, fieldErrors?: Object, error?: string }>}
- */
 export async function registerUser(payload = {}) {
-  // BACKEND TODO: Connect to backend account creation operation
+  // Call FastAPI backend
+  const res = await safeFetch('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+  if (res && res.ok && res.user) {
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(res.user));
+    } catch {}
+    return { ok: true, user: res.user };
+  } else if (res && !res.ok) {
+    return res;
+  }
+
+  // Fallback
   const firstName = (payload.firstName || '').trim();
   const lastName = (payload.lastName || '').trim();
   const initials = `${firstName[0] || 'M'}${lastName[0] || 'L'}`.toUpperCase();
@@ -136,24 +120,14 @@ export async function registerUser(payload = {}) {
 
   try {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
-  } catch {
-    // Ignore storage errors
-  }
+  } catch {}
   return { ok: true, user };
 }
 
-/**
- * Ends the active user session.
- * Used by: src/screens/ProfileScreen.jsx, src/screens/SettingsScreen.jsx
- *
- * @returns {Promise<{ ok: boolean }>}
- */
 export async function logoutUser() {
-  // BACKEND TODO: Invalidate backend session / token
+  await safeFetch('/auth/logout', { method: 'POST' });
   try {
     localStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // Ignore storage errors
-  }
+  } catch {}
   return { ok: true };
 }

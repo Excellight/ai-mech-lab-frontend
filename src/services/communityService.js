@@ -1,10 +1,8 @@
 /**
  * Community Feed & Direct Messaging Service Layer
- *
- * STATUS: Currently operates with initial community posts and message threads in local state.
- * BACKEND INTEGRATION POINT: Replace these functions with backend API calls or WebSocket/SSE
- * subscriptions to support multi-user community Q&A, project showcases, and direct messaging.
+ * Connected to FastAPI + PostgreSQL backend.
  */
+import { safeFetch } from './apiConfig.js';
 
 export const INITIAL_COMMUNITY_POSTS = [
   {
@@ -84,20 +82,30 @@ export const INITIAL_ACTIVE_THREAD = {
   ]
 };
 
-/**
- * Formats a newly submitted community question from #ask.
- * Used by: src/screens/AskScreen.jsx via MechLabContext.addCommunityQuestion
- *
- * @param {Object} input
- * @param {string} input.title - Question title (#qt)
- * @param {string} input.details - Question details/code (#qd)
- * @param {string[]} input.tags - Selected topic tags
- * @param {Object} [author] - Current session user
- * @returns {Object} CommunityPost
- */
+export async function fetchCommunityPosts() {
+  const data = await safeFetch('/community/posts');
+  if (data && data.posts && data.posts.length > 0) {
+    return data.posts;
+  }
+  return INITIAL_COMMUNITY_POSTS;
+}
+
 export function buildCommunityPost({ title, details, tags, author } = {}) {
   const displayTitle = (title || '').trim();
   const displayDetails = (details || '').trim();
+
+  // Async sync to backend
+  safeFetch('/community/posts', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: displayTitle,
+      details: displayDetails,
+      tags: Array.isArray(tags) && tags.length > 0 ? tags : ['Robotics'],
+      authorName: author?.displayName || 'Mech Learner',
+      authorInitials: author?.avatarInitials || 'ML'
+    })
+  });
+
   return {
     id: Date.now(),
     category: 'q',
