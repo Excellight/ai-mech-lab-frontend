@@ -4,3 +4,4 @@ alembic
 psycopg[binary]
 python-dotenv
 google-genai
+pwdlib[argon2]
