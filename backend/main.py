@@ -7,6 +7,683 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
+from pwdlib import PasswordHash
+from sqlalchemy.orm import Session
+
+from backend.database import get_db
+from backend.database_models import (
+    ActivityLog,
+    CheckpointAttempt,
+    CommunityPost,
+    CustomTrack,
+    GeneratedLesson,
+    GeneratedPathway,
+    PathwayStep,
+    QuizAttempt,
+    ThreadMessage,
+    User,
+    UserPreference,
+    UserStats,
+    UserTrackProgress,
+)
+from backend.pathway_repository import (
+    find_cached_pathway,
+    normalize_goal,
+    save_pathway,
+)
+
+app = FastAPI(
+    title="AI Mech Lab API",
+    description="Backend for AI-powered learning pathways and hardware engineering.",
+    version="0.1.0",
+)
+
+# CORS configuration allowing React frontend
+_default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+]
+_allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", ",".join(_default_origins)).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+
+# ---------------------------------------------------------
+# Pydantic Schemas
+# ---------------------------------------------------------
+class LoginRequest(BaseModel):
+    identifier: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class RegisterRequest(BaseModel):
+    firstName: str = ""
+    middleName: str = ""
+    lastName: str = ""
+    country: str = "Nigeria"
+    city: str = "Lagos"
+    phoneOrEmail: str
+    fieldOfStudy: str = "Mechatronics"
+    gender: str = "Prefer not to say"
+    dob: str = ""
+    username: str
+    password: str = Field(min_length=8, max_length=128)
+    termsAccepted: bool = True
+
+
+class AwardXpRequest(BaseModel):
+    amount: int
+    activityTitle: str
+    category: str = "Courses"
+    isProblem: bool = False
+    userId: Optional[str] = None
+
+
+class CheckpointRequest(BaseModel):
+    topicId: str
+    checkpointIndex: int
+    selectedOption: int
+    isCorrect: bool
+    userId: Optional[str] = None
+
+
+class QuizRequest(BaseModel):
+    deckId: str
+    score: int
+    totalQuestions: int
+    xpEarned: int = 0
+    userId: Optional[str] = None
+
+
+class TopicCompletionRequest(BaseModel):
+    trackKey: str
+    stepIndex: int = 0
+    completedStepsCount: int = 1
+    userId: Optional[str] = None
+
+
+class CustomTrackRequest(BaseModel):
+    trackKey: str
+    kind: str = "course"
+    title: str
+    stops: list = Field(default_factory=list)
+    userId: Optional[str] = None
+
+
+class UserPreferencesRequest(BaseModel):
+    themePref: str = "system"
+    textSize: int = 16
+    reduceMotion: bool = False
+    lessonReminders: bool = True
+    soundEffects: bool = True
+    selectedLanguage: str = "English"
+    userId: Optional[str] = None
+
+
+class PathwayGenerateRequest(BaseModel):
+    goal: str
+    pathwayType: str = "build_learn"  # 'build_learn' | 'build_checklist' | 'learning'
+    alreadyKnown: list = Field(default_factory=list)
+    userId: Optional[str] = None
+
+
+class LessonGenerateRequest(BaseModel):
+    stepId: int
+    goal: str
+    stepName: str
+    contentType: str = "Video"
+    label: str = "Learn"
+
+
+class ChatMessageRequest(BaseModel):
+    promptText: str
+    activeContext: dict = Field(default_factory=dict)
+    userId: Optional[str] = None
+
+
+class CommunityPostRequest(BaseModel):
+    title: str
+    details: str = ""
+    tags: list = Field(default_factory=list)
+    authorName: Optional[str] = "Mech Learner"
+    authorInitials: Optional[str] = "ML"
+    userId: Optional[str] = None
+
+
+class ThreadMessageRequest(BaseModel):
+    threadName: str
+    text: str
+    senderId: Optional[str] = None
+
+
+# ---------------------------------------------------------
+# Default / Seed Data Helpers
+# ---------------------------------------------------------
+DEFAULT_DEMO_USER_ID = "usr-mech-learner"
+password_hasher = PasswordHash.recommended()
+
+
+def get_or_create_demo_user(db: Session) -> User:
+    user = db.get(User, DEFAULT_DEMO_USER_ID)
+    if not user:
+        user = User(
+            id=DEFAULT_DEMO_USER_ID,
+            username="mechlearner",
+            phone_or_email="learner@aimechlab.local",
+            password_hash="demo_hash",
+            first_name="Mech",
+            middle_name="",
+            last_name="Learner",
+            country="Nigeria",
+            city="Lagos",
+            field_of_study="Mechatronics",
+            gender="Prefer not to say",
+            dob="2004-05-14",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        # Initialize user stats
+        stats = UserStats(
+            user_id=user.id,
+            xp=1250,
+            level=7,
+            labs_completed=18,
+            quiz_score_avg=86,
+            streak_days=6,
+            daily_problems_solved=0,
+            achievements_count=24,
+        )
+        db.add(stats)
+
+        # Initialize preferences
+        prefs = UserPreference(
+            user_id=user.id,
+            theme_pref="system",
+            text_size=16,
+            reduce_motion=False,
+            lesson_reminders=True,
+            sound_effects=True,
+            selected_language="English",
+        )
+        db.add(prefs)
+
+        # Initialize demo activities
+        sample_activities = [
+            ("act-1", "🧪", "#DDF5E3", "Completed lab: Line Following Robot", "Robotics"),
+            ("act-2", "⚡", "#FDE8E8", "Scored 100% on Circuit Analysis Quiz", "Electronics"),
+            ("act-3", "📖", "#E1EFFE", "Studied Topic 2.1: Voltage & Resistance", "Mechatronics"),
+        ]
+        for aid, icon, bg, title, cat in sample_activities:
+            db.add(ActivityLog(id=aid, user_id=user.id, icon=icon, bg=bg, title=title, category=cat))
+
+        # Initialize sample community post if empty
+        post = CommunityPost(
+            id="post-sample-1",
+            user_id=user.id,
+            author_name="Mech Learner",
+            author_initials="ML",
+            author_role="Learner",
+            title="How do I wire an HC-SR04 with a 3.3V ESP32?",
+            details="The Echo pin outputs 5V—should I use a voltage divider or logic level shifter?",
+            tags=["Robotics", "Mechatronics", "Embedded"],
+            upvotes=5,
+            replies_count=2,
+        )
+        db.add(post)
+        db.commit()
+
+    return user
+
+
+# ---------------------------------------------------------
+# Health Check & Root
+# ---------------------------------------------------------
+@app.get("/")
+def home():
+    return {
+        "message": "Welcome to AI Mech Lab API!",
+        "status": "running",
+        "database": "PostgreSQL connected",
+    }
+
+
+@app.get("/health")
+def health_check(db: Session = Depends(get_db)):
+    # Verify DB connectivity
+    try:
+        db.execute(select(1)).first()
+        db_status = "healthy"
+    except Exception:
+        db_status = "unhealthy"
+
+    return {
+        "status": "healthy" if db_status == "healthy" else "degraded",
+        "service": "AI Mech Lab API",
+        "database": db_status,
+    }
+
+
+# ---------------------------------------------------------
+# 1. Authentication Endpoints
+# ---------------------------------------------------------
+@app.post("/api/auth/register")
+def register_user(payload: RegisterRequest, db: Session = Depends(get_db)):
+    username = payload.username.strip()
+    contact = payload.phoneOrEmail.strip()
+    if not username or not contact:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Username and email/phone are required.",
+        )
+
+    existing_user = db.scalar(
+        select(User).where(
+            (User.username == username) | (User.phone_or_email == contact)
+        )
+    )
+    if existing_user:
+        return {
+            "ok": False,
+            "error": "A user with this username or email/phone already exists.",
+            "fieldErrors": {
+                "un": existing_user.username == username,
+                "ph": existing_user.phone_or_email == contact,
+            },
+        }
+
+    user_id = f"usr_{uuid.uuid4().hex[:12]}"
+    user = User(
+        id=user_id,
+        username=username,
+        phone_or_email=contact,
+        password_hash=password_hasher.hash(payload.password),
+        first_name=payload.firstName.strip(),
+        middle_name=payload.middleName.strip(),
+        last_name=payload.lastName.strip(),
+        country=payload.country.strip(),
+        city=payload.city.strip(),
+        field_of_study=payload.fieldOfStudy.strip(),
+        gender=payload.gender.strip(),
+        dob=payload.dob.strip(),
+    )
+    db.add(user)
+    db.add(UserStats(user_id=user_id, xp=100, level=1))
+    db.add(UserPreference(user_id=user_id))
+
+    try:
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with those details already exists.",
+        ) from None
+
+    display_name = f"{user.first_name} {user.last_name}".strip() or user.username
+    initials = (
+        f"{user.first_name[:1]}{user.last_name[:1]}".upper()
+        if user.first_name
+        else user.username[:2].upper()
+    )
+
+    return {
+        "ok": True,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "displayName": display_name,
+            "avatarInitials": initials,
+            "firstName": user.first_name,
+            "middleName": user.middle_name,
+            "lastName": user.last_name,
+            "phoneOrEmail": user.phone_or_email,
+            "country": user.country,
+            "city": user.city,
+            "fieldOfStudy": user.field_of_study,
+            "gender": user.gender,
+            "dob": user.dob,
+            "authenticated": True,
+        },
+    }
+
+
+@app.post("/api/auth/login")
+def login_user(payload: LoginRequest, db: Session = Depends(get_db)):
+    ident = payload.identifier.strip()
+    user = db.scalar(
+        select(User).where((User.username == ident) | (User.phone_or_email == ident))
+    )
+
+    # Use one generic response so callers cannot determine whether an account exists.
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username/email or password.",
+        )
+
+    try:
+        password_is_valid = password_hasher.verify(payload.password, user.password_hash)
+    except Exception:
+        password_is_valid = False
+
+    if not password_is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username/email or password.",
+        )
+
+    display_name = f"{user.first_name} {user.last_name}".strip() or user.username
+    initials = (
+        f"{user.first_name[:1]}{user.last_name[:1]}".upper()
+        if user.first_name
+        else user.username[:2].upper()
+    )
+
+    return {
+        "ok": True,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "displayName": display_name,
+            "avatarInitials": initials,
+            "firstName": user.first_name,
+            "middleName": user.middle_name,
+            "lastName": user.last_name,
+            "phoneOrEmail": user.phone_or_email,
+            "country": user.country,
+            "city": user.city,
+            "fieldOfStudy": user.field_of_study,
+            "gender": user.gender,
+            "dob": user.dob,
+            "authenticated": True,
+        },
+    }
+
+
+@app.post("/api/auth/logout")
+def logout_user():
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def get_current_user(userId: Optional[str] = None, db: Session = Depends(get_db)):
+    if not userId:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A user identifier is required.",
+        )
+    user = db.get(User, userId)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User account not found.",
+        )
+    display_name = f"{user.first_name} {user.last_name}".strip() or user.username
+    initials = (
+        f"{user.first_name[:1]}{user.last_name[:1]}".upper()
+        if user.first_name
+        else user.username[:2].upper()
+    )
+    return {
+        "id": user.id,
+        "username": user.username,
+        "displayName": display_name,
+        "avatarInitials": initials,
+        "firstName": user.first_name,
+        "lastName": user.last_name,
+        "phoneOrEmail": user.phone_or_email,
+        "country": user.country,
+        "city": user.city,
+        "fieldOfStudy": user.field_of_study,
+        "gender": user.gender,
+        "dob": user.dob,
+        "authenticated": True,
+    }
+
+
+# ---------------------------------------------------------
+# 2. User Progress, Dashboard & Stats Endpoints
+# ---------------------------------------------------------
+@app.get("/api/user/dashboard")
+def get_dashboard_summary(userId: Optional[str] = None, db: Session = Depends(get_db)):
+    uid = userId or DEFAULT_DEMO_USER_ID
+    get_or_create_demo_user(db)
+
+    stats = db.get(UserStats, uid)
+    if not stats:
+        stats = UserStats(user_id=uid)
+        db.add(stats)
+        db.commit()
+        db.refresh(stats)
+
+    activities = (
+        db.scalars(
+            select(ActivityLog)
+            .where(ActivityLog.user_id == uid)
+            .order_by(desc(ActivityLog.created_at))
+            .limit(10)
+        ).all()
+    )
+
+    feed = [
+        {
+            "id": a.id,
+            "icon": a.icon,
+            "bg": a.bg,
+            "title": a.title,
+            "category": a.category,
+            "time": "Just now",
+        }
+        for a in activities
+    ]
+
+    return {
+        "learnerStats": {
+            "xp": stats.xp,
+            "level": stats.level,
+            "labsCompleted": stats.labs_completed,
+            "quizScoreAvg": stats.quiz_score_avg,
+            "streakDays": stats.streak_days,
+            "dailyProblemsSolved": stats.daily_problems_solved,
+            "achievementsCount": stats.achievements_count,
+        },
+        "activityFeed": feed,
+        "unreadNotifications": False,
+    }
+
+
+@app.post("/api/user/xp")
+def award_xp(payload: AwardXpRequest, db: Session = Depends(get_db)):
+    uid = payload.userId or DEFAULT_DEMO_USER_ID
+    stats = db.get(UserStats, uid)
+    if not stats:
+        stats = UserStats(user_id=uid)
+        db.add(stats)
+
+    stats.xp += payload.amount
+    # Every 200 XP increases level
+    stats.level = max(1, stats.xp // 200 + 1)
+    if payload.isProblem:
+        stats.daily_problems_solved += 1
+
+    act_id = f"act-{uuid.uuid4().hex[:8]}"
+    activity = ActivityLog(
+        id=act_id,
+        user_id=uid,
+        icon="⚡",
+        bg="#FEF08A",
+        title=payload.activityTitle,
+        category=payload.category,
+    )
+    db.add(activity)
+    db.commit()
+
+    return {
+        "ok": True,
+        "learnerStats": {
+            "xp": stats.xp,
+            "level": stats.level,
+            "labsCompleted": stats.labs_completed,
+            "quizScoreAvg": stats.quiz_score_avg,
+            "streakDays": stats.streak_days,
+            "dailyProblemsSolved": stats.daily_problems_solved,
+            "achievementsCount": stats.achievements_count,
+        },
+    }
+
+
+@app.get("/api/user/preferences")
+def get_user_preferences(userId: Optional[str] = None, db: Session = Depends(get_db)):
+    uid = userId or DEFAULT_DEMO_USER_ID
+    pref = db.get(UserPreference, uid)
+    if not pref:
+        pref = UserPreference(user_id=uid)
+        db.add(pref)
+        db.commit()
+
+    return {
+        "themePref": pref.theme_pref,
+        "textSize": pref.text_size,
+        "reduceMotion": pref.reduce_motion,
+        "lessonReminders": pref.lesson_reminders,
+        "soundEffects": pref.sound_effects,
+        "selectedLanguage": pref.selected_language,
+    }
+
+
+@app.post("/api/user/preferences")
+def update_user_preferences(payload: UserPreferencesRequest, db: Session = Depends(get_db)):
+    uid = payload.userId or DEFAULT_DEMO_USER_ID
+    pref = db.get(UserPreference, uid)
+    if not pref:
+        pref = UserPreference(user_id=uid)
+        db.add(pref)
+
+    pref.theme_pref = payload.themePref
+    pref.text_size = payload.textSize
+    pref.reduce_motion = payload.reduceMotion
+    pref.lesson_reminders = payload.lessonReminders
+    pref.sound_effects = payload.soundEffects
+    pref.selected_language = payload.selectedLanguage
+    db.commit()
+
+    return {"ok": True}
+
+
+# ---------------------------------------------------------
+# 3. Courses, Tracks & Station Completions
+# ---------------------------------------------------------
+@app.get("/api/courses/progress")
+def get_all_course_progress(userId: Optional[str] = None, db: Session = Depends(get_db)):
+    uid = userId or DEFAULT_DEMO_USER_ID
+    records = db.scalars(select(UserTrackProgress).where(UserTrackProgress.user_id == uid)).all()
+    tracks = {}
+    for r in records:
+        tracks[r.track_key] = {
+            "completed": r.completed_steps_count,
+            "lastStepIndex": r.last_step_index,
+        }
+    return {"tracks": tracks}
+
+
+@app.post("/api/courses/completion")
+def record_topic_completion(payload: TopicCompletionRequest, db: Session = Depends(get_db)):
+    uid = payload.userId or DEFAULT_DEMO_USER_ID
+    progress = db.scalar(
+        select(UserTrackProgress).where(
+            UserTrackProgress.user_id == uid,
+            UserTrackProgress.track_key == payload.trackKey,
+        )
+    )
+    if not progress:
+        progress = UserTrackProgress(
+            user_id=uid,
+            track_key=payload.trackKey,
+            completed_steps_count=payload.completedStepsCount,
+            last_step_index=payload.stepIndex,
+        )
+        db.add(progress)
+    else:
+        progress.completed_steps_count = max(
+            progress.completed_steps_count, payload.completedStepsCount
+        )
+        progress.last_step_index = payload.stepIndex
+
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/courses/custom-tracks")
+def get_custom_tracks(userId: Optional[str] = None, db: Session = Depends(get_db)):
+    uid = userId or DEFAULT_DEMO_USER_ID
+    tracks = db.scalars(select(CustomTrack).where(CustomTrack.user_id == uid)).all()
+    return {
+        "tracks": [
+            {
+                "trackKey": t.track_key,
+                "kind": t.kind,
+                "title": t.title,
+                "stops": t.stops,
+            }
+            for t in tracks
+        ]
+    }
+
+
+@app.post("/api/courses/custom-tracks")
+def save_custom_track(payload: CustomTrackRequest, db: Session = Depends(get_db)):
+    uid = payload.userId or DEFAULT_DEMO_USER_ID
+    existing = db.scalar(select(CustomTrack).where(CustomTrack.track_key == payload.trackKey))
+    if existing:
+        existing.title = payload.title
+        existing.stops = payload.stops
+    else:
+        new_track = CustomTrack(
+            user_id=uid,
+            track_key=payload.trackKey,
+            kind=payload.kind,
+            title=payload.title,
+            stops=payload.stops,
+        )
+        db.add(new_track)
+
+    db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------
+# 4. Interactive Classroom (Checkpoints, Quizzes)
+# ---------------------------------------------------------
+@app.post("/api/classroom/checkpoint")
+def record_checkpoint(payload: CheckpointRequest, db: Session = Depends(get_db)):
+    uid = payload.userId or DEFAULT_DEMO_USER_ID
+    attempt = CheckpointAttempt(
+        user_id=uid,
+        topic_id=payload.topicId,
+        check os
+import uuid
+from datetime import datetime
+from typing import Any, Optional
+
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
